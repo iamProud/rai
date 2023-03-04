@@ -23,7 +23,7 @@
 #include "../Gui/viewer.h"
 #include "../LGP/LGP_tree.h"
 
-void checkView(shared_ptr<rai::Configuration>& self){ if(self->hasView()) self->watch(); }
+//void checkView(shared_ptr<rai::Configuration>& self){ if(self->hasView()) self->view(); }
 void null_deleter(rai::Frame*){}
 
 void init_Config(pybind11::module& m) {
@@ -33,12 +33,10 @@ void init_Config(pybind11::module& m) {
 
   .def("clear", [](shared_ptr<rai::Configuration>& self) {
     self->clear();
-    checkView(self);
   }, "clear all frames and additional data; becomes the empty configuration, with no frames")
 
   .def("copy", [](shared_ptr<rai::Configuration>& self, shared_ptr<rai::Configuration>& C2) {
     self->copy(*C2);
-    checkView(self);
   },
   "make C a (deep) copy of the given C2",
   pybind11::arg("C2")
@@ -48,7 +46,6 @@ void init_Config(pybind11::module& m) {
 
   .def("addFile", [](shared_ptr<rai::Configuration>& self, const std::string& fileName) {
     self->addFile(fileName.c_str());
-    checkView(self);
   },
   "add the contents of the file to C",
   pybind11::arg("file_name")
@@ -56,7 +53,6 @@ void init_Config(pybind11::module& m) {
 
   .def("addFrame", [](shared_ptr<rai::Configuration>& self, const std::string& name, const std::string& parent, const std::string& args) {
     rai::Frame* f = self->addFrame(name.c_str(), parent.c_str(), args.c_str());
-    checkView(self);
     return shared_ptr<rai::Frame>(f, &null_deleter ); //giving it a non-sense deleter!
   },
   "add a new frame to C; optionally make this a child to the given parent; use the Frame methods to set properties of the new frame",
@@ -84,7 +80,6 @@ void init_Config(pybind11::module& m) {
       if(quat.size()) f->setQuaternion(arr(quat, true));
     }
 
-    checkView(self);
     return shared_ptr<rai::Frame>(f, &null_deleter ); //giving it a non-sense deleter!
   }, "TODO remove! use addFrame only",
   pybind11::arg("name"),
@@ -128,17 +123,12 @@ void init_Config(pybind11::module& m) {
   .def("delFrame", [](shared_ptr<rai::Configuration>& self, const std::string& frameName) {
     rai::Frame* p = self->getFrame(frameName.c_str(), true);
     if(p) delete p;
-    checkView(self);
   },
   "destroy and remove a frame from C",
   pybind11::arg("frameName")
       )
 
-  .def("getJointNames", [](shared_ptr<rai::Configuration>& self) {
-    return I_conv(self->getJointNames());
-  },
-  "get the list of joint names"
-      )
+  .def("getJointNames", &rai::Configuration::getJointNames, "get the list of joint names" )
 
   .def("getJointDimension", [](shared_ptr<rai::Configuration>& self) {
     return self->getJointStateDimension();
@@ -154,8 +144,13 @@ void init_Config(pybind11::module& m) {
 //    return arr2numpy(q);
   },
   "get the joint state as a numpy vector, optionally only for a subset of joints specified as list of joint names",
-  pybind11::arg("joints") = ry::I_StringA()
+  pybind11::arg("joints") = std::vector<std::string>()
       )
+
+  .def("getDofIDs", [](shared_ptr<rai::Configuration>& self){
+      uintA dofIDs = self->getDofIDs();
+      return Array2vec<uint>(dofIDs);
+  }, "" )
 
 //  .def("setJointState", [](shared_ptr<rai::Configuration>& self, const std::vector<double>& q, const uintA& joints) {
 //    if(joints.N) {
@@ -163,8 +158,7 @@ void init_Config(pybind11::module& m) {
 //    } else {
 //      self->setJointState(arr(q, true));
 //    }
-//    checkView(self);
-//  },
+////  },
 //  "set the joint state, optionally only for a subset of joints specified as list of frameIDs",
 //  pybind11::arg("q"),
 //  pybind11::arg("joints") = uintA()
@@ -176,7 +170,6 @@ void init_Config(pybind11::module& m) {
     } else {
       self->setJointState(q, self->getFrames(list2arr<rai::String>(joints)));
     }
-    checkView(self);
   },
   "set the joint state, optionally only for a subset of joints specified as list of joint names",
   pybind11::arg("q"),
@@ -185,11 +178,10 @@ void init_Config(pybind11::module& m) {
 
   .def("setJointStateSlice", [](shared_ptr<rai::Configuration>& self, const std::vector<double>& q, uint t) {
     self->setJointStateSlice(arr(q, true), t);
-    checkView(self);
   }, "")
 
   .def("getFrameNames", [](shared_ptr<rai::Configuration>& self) {
-    return I_conv(self->getFrameNames());
+    return StringA2strvec(self->getFrameNames());
   },
   "get the list of frame names"
       )
@@ -214,59 +206,57 @@ void init_Config(pybind11::module& m) {
     return arr2numpy(X);
   }, "TODO remove -> use individual frame!")
 
-  .def("setFrameState", [](shared_ptr<rai::Configuration>& self, const std::vector<double>& X, const ry::I_StringA& frames) {
+  .def("setFrameState", [](shared_ptr<rai::Configuration>& self, const std::vector<double>& X, const std::vector<std::string>& frames) {
     arr _X (X, true);
     _X.reshape(_X.N/7, 7);
     if(frames.size()){
-      self->setFrameState(_X, self->getFrames(I_conv(frames)));
+      self->setFrameState(_X, self->getFrames(strvec2StringA(frames)));
     }else{
       self->setFrameState(_X);
     }
-    checkView(self);
   },
   "set the frame state, optionally only for a subset of frames specified as list of frame names",
   pybind11::arg("X"),
-  pybind11::arg("frames") = ry::I_StringA()
+  pybind11::arg("frames") = std::vector<std::string>()
       )
 
-  .def("setFrameState", [](shared_ptr<rai::Configuration>& self, const pybind11::array& X, const ry::I_StringA& frames) {
+  .def("setFrameState", [](shared_ptr<rai::Configuration>& self, const pybind11::array& X, const std::vector<std::string>& frames) {
     arr _X = numpy2arr<double>(X);
     _X.reshape(_X.N/7, 7);
     if(frames.size()){
-      self->setFrameState(_X, self->getFrames(I_conv(frames)));
+      self->setFrameState(_X, self->getFrames(strvec2StringA(frames)));
     }else{
       self->setFrameState(_X);
     }
-    checkView(self);
   },
   "set the frame state, optionally only for a subset of frames specified as list of frame names",
   pybind11::arg("X"),
-  pybind11::arg("frames") = ry::I_StringA()
+  pybind11::arg("frames") = std::vector<std::string>()
       )
 
-  .def("feature", [](shared_ptr<rai::Configuration>& self, FeatureSymbol featureSymbol, const ry::I_StringA& frameNames, const std::vector<double>& scale, const std::vector<double>& target, int order) {
-    return symbols2feature(featureSymbol, I_conv(frameNames), *self, arr(scale, true), arr(target, true), order);
+  .def("feature", [](shared_ptr<rai::Configuration>& self, FeatureSymbol featureSymbol, const std::vector<std::string>& frameNames, const std::vector<double>& scale, const std::vector<double>& target, int order) {
+    return symbols2feature(featureSymbol, strvec2StringA(frameNames), *self, arr(scale, true), arr(target, true), order);
   },
   "create a feature (a differentiable map from joint state to a vector space), as they're typically used for IK or optimization. See the dedicated tutorial for details. \
 featureSymbol defines which mapping this is (position, vectors, collision distance, etc). \
 many mapping refer to one or several frames, which need to be specified using frameNames",
   pybind11::arg("featureSymbol"),
-  pybind11::arg("frameNames")=ry::I_StringA(),
+  pybind11::arg("frameNames")=std::vector<std::string>(),
     pybind11::arg("scale")=std::vector<double>(),
     pybind11::arg("target")=std::vector<double>(),
     pybind11::arg("order")=0
     )
 
-  .def("evalFeature", [](shared_ptr<rai::Configuration>& self, FeatureSymbol fs, const ry::I_StringA& frames) {
-    arr y = self->evalFeature(fs, I_conv(frames));
+  .def("evalFeature", [](shared_ptr<rai::Configuration>& self, FeatureSymbol fs, const std::vector<std::string>& frames) {
+    arr y = self->evalFeature(fs, strvec2StringA(frames));
     return pybind11::make_tuple(arr2numpy(y), arr2numpy(y.J()));
   }, "TODO remove -> use feature directly"
       )
 
-  .def("selectJoints", [](shared_ptr<rai::Configuration>& self, const ry::I_StringA& jointNames, bool notThose) {
+  .def("selectJoints", [](shared_ptr<rai::Configuration>& self, const std::vector<std::string>& jointNames, bool notThose) {
     // TODO: this is joint groups
     // TODO: maybe call joint groups just joints and joints DOFs
-    self->selectJointsByName(I_conv(jointNames), notThose);
+    self->selectJointsByName(strvec2StringA(jointNames), notThose);
   },
   "redefine what are considered the DOFs of this configuration: only joints listed in jointNames are considered \
 part of the joint state and define the number of DOFs",
@@ -274,8 +264,8 @@ part of the joint state and define the number of DOFs",
   pybind11::arg("notThose") = false
       )
 
-  .def("selectJointsByTag", [](shared_ptr<rai::Configuration>& self, const ry::I_StringA& jointGroups) {
-    self->selectJointsByAtt(I_conv(jointGroups));
+  .def("selectJointsByTag", [](shared_ptr<rai::Configuration>& self, const std::vector<std::string>& jointGroups) {
+    self->selectJointsByAtt(strvec2StringA(jointGroups));
     self->ensure_q();
   },
   "redefine what are considered the DOFs of this configuration: only joint that have a tag listed in jointGroups are considered \
@@ -283,21 +273,18 @@ part of the joint state and define the number of DOFs",
   pybind11::arg("jointGroups")
       )
 
-  .def("makeObjectsFree", [](shared_ptr<rai::Configuration>& self, const ry::I_StringA& objs) {
-    self->makeObjectsFree(I_conv(objs));
-    checkView(self);
+  .def("makeObjectsFree", [](shared_ptr<rai::Configuration>& self, const std::vector<std::string>& objs) {
+    self->makeObjectsFree(strvec2StringA(objs));
   }, "TODO remove -> to frame")
 
   .def("makeObjectsConvex", [](shared_ptr<rai::Configuration>& self) {
     makeConvexHulls(self->frames);
-    checkView(self);
   },
   "remake all meshes associated with all frames to become their convex hull"
       )
 
   .def("attach", [](shared_ptr<rai::Configuration>& self, const std::string& frame1, const std::string& frame2) {
     self->attach(frame1.c_str(), frame2.c_str());
-    checkView(self);
   },
   "change the configuration by creating a rigid joint from frame1 to frame2, adopting their current \
 relative pose. This also breaks the first joint that is parental to frame2 and reverses the \
@@ -306,7 +293,6 @@ topological order from frame2 to the broken joint"
 
   .def("computeCollisions", [](shared_ptr<rai::Configuration>& self) {
     self->stepSwift();
-    checkView(self);
   },
   "call the broadphase collision engine (SWIFT++ or FCL) to generate the list of collisions (or near proximities) \
 between all frame shapes that have the collision tag set non-zero"
@@ -333,10 +319,10 @@ To get really precise distances and penetrations use the FS.distance feature wit
   pybind11::arg("belowMargin") = 1.
       )
 
-  .def("view", [](shared_ptr<rai::Configuration>& self) {
-    self->gl()->setConfiguration(*self);
-  },
-  "create a viewer for this configuration. Optionally, specify a frame that is the origin of the viewer camera")
+  .def("view",  &rai::Configuration::view,
+       "open a view window for the configuration",
+       pybind11::arg("pause")=false,
+       pybind11::arg("message")=nullptr)
 
   .def("view_recopyMeshes", [](shared_ptr<rai::Configuration>& self) {
     self->gl()->recopyMeshes(*self);
@@ -354,9 +340,8 @@ To get really precise distances and penetrations use the FS.distance feature wit
    return Array2numpy<byte>(rgb);
   })
 
-  .def("view_close", [](shared_ptr<rai::Configuration>& self) {
-    self->gl().reset();
-  }, "close the view")
+  .def("view_close", &rai::Configuration::view_close,
+  "close the view")
 
   .def("cameraView", [](shared_ptr<rai::Configuration>& self) {
     ry::RyCameraView view;
@@ -370,10 +355,16 @@ To get really precise distances and penetrations use the FS.distance feature wit
     rai::Configuration K;
     editConfiguration(fileName, K);
     self->copy(K);
-    checkView(self);
   },
   "launch a viewer that listents (inode) to changes of a file (made by you in an editor), and \
 reloads, displays and animates the configuration whenever the file is changed"
+      )
+  .def("save", [](shared_ptr<rai::Configuration>& self, const char* fileName) {
+    std::ofstream out(fileName);
+    self->write(out);
+    out.close();
+  },
+  "save configuration to a file"
       )
 
   .def("komo_IK", [](shared_ptr<rai::Configuration>& self, bool useSwift) {
@@ -445,13 +436,6 @@ from broadphase collision computation)",
   "create an LGP solver"
       )
 
-  .def("bullet", [](shared_ptr<rai::Configuration>& self) {
-    return make_shared<BulletInterface>(*self);
-  },
-  "create a Bullet engine for physical simulation from the configuration: The configuration \
-  is being exported into a bullet instance, which can be stepped forward, and the result syced back to this configuration"
-      )
-
   .def("physx", [](shared_ptr<rai::Configuration>& self) {
     return make_shared<PhysXInterface>(*self);
   },
@@ -460,6 +444,14 @@ from broadphase collision computation)",
       )
   */
 
+  .def("bullet", [](shared_ptr<rai::Configuration>& self) {
+    return make_shared<BulletInterface>(*self);
+  },
+  "create a Bullet engine for physical simulation from the configuration: The configuration \
+  is being exported into a bullet instance, which can be stepped forward, and the result syced back to this configuration"
+      )
+
+  
   .def("simulation", [](shared_ptr<rai::Configuration>& self, rai::Simulation::SimulatorEngine engine, int verbose) {
     return make_shared<rai::Simulation>(*self, engine, verbose);
   },
@@ -481,7 +473,6 @@ allows you to control robot motors by position, velocity, or accelerations, \
 
   .def("sortFrames", [](shared_ptr<rai::Configuration>& self) {
     self->sortFrames();
-    checkView(self);
   }, "resort the internal order of frames according to the tree topology. This is important before saving the configuration.")
 
   .def("equationOfMotion", [](shared_ptr<rai::Configuration>& self, std::vector<double>& qdot, bool gravity) {
@@ -495,7 +486,6 @@ allows you to control robot motors by position, velocity, or accelerations, \
   .def("stepDynamics", [](shared_ptr<rai::Configuration>& self, std::vector<double>& qdot, std::vector<double>& u_control, double tau, double dynamicNoise, bool gravity) {
     arr _qdot(qdot, false);
     self->stepDynamics(_qdot, arr(u_control, true), tau, dynamicNoise, gravity);
-    checkView(self);
     return arr2numpy(_qdot);
   }, "",
   pybind11::arg("qdot"),
